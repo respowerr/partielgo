@@ -1,21 +1,23 @@
 package db
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
-// Room représente une salle avec son identifiant, nom et capacité.
 type Room struct {
 	ID       int
 	Name     string
 	Capacity int
 }
 
-// Reservation représente une réservation avec son identifiant, l'identifiant de salle, la date et les heures de début et de fin.
 type Reservation struct {
 	ID        int
 	RoomID    int
@@ -23,131 +25,150 @@ type Reservation struct {
 	StartTime string
 	EndTime   string
 }
-
-// Database contient les listes des salles et des réservations.
 type Database struct {
-	Rooms        []Room
-	Reservations []Reservation
+	Connection *sql.DB
 }
 
-// New initialise une nouvelle base de données avec des listes vides.
 func New() *Database {
-	return &Database{
-		Rooms:        []Room{},
-		Reservations: []Reservation{},
+	db, err := sql.Open("sqlite3", "./reservation.db")
+	if err != nil {
+		log.Fatal(err)
 	}
+	if err := createTables(db); err != nil {
+		log.Fatal(err)
+	}
+	return &Database{Connection: db}
 }
 
-// AddRoom ajoute une nouvelle salle à la base de données.
+func createTables(db *sql.DB) error {
+	_, err := db.Exec(`
+    CREATE TABLE IF NOT EXISTS rooms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        capacity INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS reservations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id INTEGER,
+        date TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        FOREIGN KEY(room_id) REFERENCES rooms(id)
+    );`)
+	return err
+}
+
 func (db *Database) AddRoom(name string, capacity int) error {
-	newID := len(db.Rooms) + 1
-	db.Rooms = append(db.Rooms, Room{ID: newID, Name: name, Capacity: capacity})
-	return nil
-}
-
-// RemoveRoom supprime une salle par son identifiant.
-func (db *Database) RemoveRoom(roomID int) error {
-	for i, room := range db.Rooms {
-		if room.ID == roomID {
-			db.Rooms = append(db.Rooms[:i], db.Rooms[i+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("Salle avec l'ID %d non trouvée", roomID)
-}
-
-// AddReservation ajoute une nouvelle réservation si la salle est disponible.
-func (db *Database) AddReservation(reservation Reservation) error {
-	if !db.IsRoomAvailable(reservation.RoomID, reservation.Date, reservation.StartTime, reservation.EndTime) {
-		return fmt.Errorf("La salle n'est pas disponible")
-	}
-	reservation.ID = len(db.Reservations) + 1
-	db.Reservations = append(db.Reservations, reservation)
-	return nil
-}
-
-// CancelReservation annule une réservation par son identifiant.
-func (db *Database) CancelReservation(reservationID int) error {
-	for i, res := range db.Reservations {
-		if res.ID == reservationID {
-			db.Reservations = append(db.Reservations[:i], db.Reservations[i+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("Réservation avec l'ID %d non trouvée", reservationID)
-}
-
-// ListRooms retourne la liste de toutes les salles.
-func (db *Database) ListRooms() []Room {
-	return db.Rooms
-}
-
-// ListAllReservations retourne la liste de toutes les réservations.
-func (db *Database) ListAllReservations() []Reservation {
-	return db.Reservations
-}
-
-// IsRoomAvailable vérifie si une salle est disponible pour une réservation donnée.
-func (db *Database) IsRoomAvailable(roomID int, date, startTime, endTime string) bool {
-	for _, res := range db.Reservations {
-		if res.RoomID == roomID && res.Date == date && (startTime < res.EndTime && endTime > res.StartTime) {
-			return false
-		}
-	}
-	return true
-}
-
-// ExportReservations exporte les réservations au format JSON ou CSV.
-func (db *Database) ExportReservations(filename string, format string) error {
-	if format == "json" {
-		return db.ExportJSON(filename)
-	} else if format == "csv" {
-		return db.ExportCSV(filename)
-	}
-	return fmt.Errorf("Format non supporté")
-}
-
-// ExportJSON écrit les réservations dans un fichier JSON.
-func (db *Database) ExportJSON(filename string) error {
-	file, err := os.Create(filename)
+	stmt, err := db.Connection.Prepare("INSERT INTO rooms (name, capacity) VALUES (?, ?)")
 	if err != nil {
-		return fmt.Errorf("Échec de la création du fichier : %v", err)
+		return err
+	}
+	_, err = stmt.Exec(name, capacity)
+	return err
+}
+
+func (db *Database) ListRooms() ([]Room, error) {
+	rows, err := db.Connection.Query("SELECT id, name, capacity FROM rooms")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rooms []Room
+	for rows.Next() {
+		var r Room
+		if err := rows.Scan(&r.ID, &r.Name, &r.Capacity); err != nil {
+			return nil, err
+		}
+		rooms = append(rooms, r)
+	}
+	return rooms, nil
+}
+
+func (db *Database) RemoveRoom(id int) error {
+	_, err := db.Connection.Exec("DELETE FROM rooms WHERE id = ?", id)
+	return err
+}
+
+func (db *Database) AddReservation(roomID int, date, startTime, endTime string) error {
+	stmt, err := db.Connection.Prepare("INSERT INTO reservations (room_id, date, start_time, end_time) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	_, err = stmt.Exec(roomID, date, startTime, endTime)
+	return err
+}
+
+func (db *Database) ListReservations() ([]Reservation, error) {
+	rows, err := db.Connection.Query("SELECT id, room_id, date, start_time, end_time FROM reservations")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reservations []Reservation
+	for rows.Next() {
+		var r Reservation
+		if err := rows.Scan(&r.ID, &r.RoomID, &r.Date, &r.StartTime, &r.EndTime); err != nil {
+			return nil, err
+		}
+		reservations = append(reservations, r)
+	}
+	return reservations, nil
+}
+
+func (db *Database) CancelReservation(id int) error {
+	_, err := db.Connection.Exec("DELETE FROM reservations WHERE id = ?", id)
+	return err
+}
+func (db *Database) ExportReservations(format string) error {
+	switch format {
+	case "json":
+		return db.exportReservationsAsJSON()
+	case "csv":
+		return db.exportReservationsAsCSV()
+	default:
+		return fmt.Errorf("unsupported format %s", format)
+	}
+}
+
+func (db *Database) exportReservationsAsJSON() error {
+	reservations, err := db.ListReservations()
+	if err != nil {
+		return err
+	}
+	file, err := os.Create("reservations.json")
+	if err != nil {
+		return err
 	}
 	defer file.Close()
-
 	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(db.Reservations); err != nil {
-		return fmt.Errorf("Échec de l'encodage des réservations : %v", err)
-	}
-
-	return nil
+	encoder.SetIndent("", "    ")
+	return encoder.Encode(reservations)
 }
 
-// ExportCSV écrit les réservations dans un fichier CSV.
-func (db *Database) ExportCSV(filename string) error {
-	file, err := os.Create(filename)
+func (db *Database) exportReservationsAsCSV() error {
+	reservations, err := db.ListReservations()
 	if err != nil {
-		return fmt.Errorf("Échec de la création du fichier : %v", err)
+		return err
+	}
+	file, err := os.Create("reservations.csv")
+	if err != nil {
+		return err
 	}
 	defer file.Close()
-
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
+	// Writing CSV header
 	if err := writer.Write([]string{"ID", "RoomID", "Date", "StartTime", "EndTime"}); err != nil {
-		return fmt.Errorf("Échec de l'écriture de l'en-tête : %v", err)
+		return err
 	}
 
-	for _, reservation := range db.Reservations {
-		record := []string{
-			strconv.Itoa(reservation.ID),
-			strconv.Itoa(reservation.RoomID),
-			reservation.Date,
-			reservation.StartTime,
-			reservation.EndTime,
-		}
-		if err := writer.Write(record); err != nil {
-			return fmt.Errorf("Échec de l'écriture de l'enregistrement : %v", err)
+	// Writing data rows
+	for _, res := range reservations {
+		if err := writer.Write([]string{strconv.Itoa(res.ID), strconv.Itoa(res.RoomID), res.Date, res.StartTime, res.EndTime}); err != nil {
+			return err
 		}
 	}
 	return nil
