@@ -8,10 +8,9 @@ import (
 	"strconv"
 )
 
-var database = db.New()
-var scanner = bufio.NewScanner(os.Stdin)
+func Run(database *db.Database) {
+	scanner := bufio.NewScanner(os.Stdin)
 
-func Run() {
 	for {
 		fmt.Println("\nMenu principal :")
 		fmt.Println("1. Lister toutes les salles")
@@ -32,21 +31,21 @@ func Run() {
 
 		switch choice {
 		case "1":
-			listRooms()
+			listRooms(database)
 		case "2":
-			addRoom()
+			addRoom(database, scanner)
 		case "3":
-			removeRoom()
+			removeRoom(database, scanner)
 		case "4":
-			createReservation()
+			createReservation(database, scanner)
 		case "5":
-			cancelReservation()
+			cancelReservation(database, scanner)
 		case "6":
-			listReservations()
+			listReservations(database)
 		case "7":
-			exportReservations("json")
+			exportReservations(database, "json")
 		case "8":
-			exportReservations("csv")
+			exportReservations(database, "csv")
 		case "9":
 			fmt.Println("Au revoir !")
 			return
@@ -56,7 +55,7 @@ func Run() {
 	}
 }
 
-func listRooms() {
+func listRooms(database *db.Database) {
 	rooms := database.ListRooms()
 	if len(rooms) == 0 {
 		fmt.Println("Aucune salle disponible.")
@@ -67,9 +66,14 @@ func listRooms() {
 	}
 }
 
-func addRoom() {
-	name := prompt("Entrez le nom de la salle : ")
-	capacity := promptForInt("Entrez la capacité de la salle : ")
+func addRoom(database *db.Database, scanner *bufio.Scanner) {
+	fmt.Print("Entrez le nom de la salle : ")
+	scanner.Scan()
+	name := scanner.Text()
+	fmt.Print("Entrez la capacité de la salle : ")
+	scanner.Scan()
+	capacity, _ := strconv.Atoi(scanner.Text())
+
 	if err := database.AddRoom(name, capacity); err != nil {
 		fmt.Println("Erreur lors de l'ajout de la salle :", err)
 	} else {
@@ -77,8 +81,11 @@ func addRoom() {
 	}
 }
 
-func removeRoom() {
-	roomID := promptForInt("Entrez l'ID de la salle à supprimer : ")
+func removeRoom(database *db.Database, scanner *bufio.Scanner) {
+	fmt.Print("Entrez l'ID de la salle à supprimer : ")
+	scanner.Scan()
+	roomID, _ := strconv.Atoi(scanner.Text())
+
 	if err := database.RemoveRoom(roomID); err != nil {
 		fmt.Println("Erreur lors de la suppression de la salle :", err)
 	} else {
@@ -86,37 +93,46 @@ func removeRoom() {
 	}
 }
 
-func createReservation() {
-	fmt.Println("Entrez les détails de la réservation :")
-	roomID := promptForInt("ID de la salle : ")
-	date := prompt("Date (YYYY-MM-DD) : ")
-	startTime := prompt("Heure de début (HH:MM) : ")
-	endTime := prompt("Heure de fin (HH:MM) : ")
-	err := database.AddReservation(db.Reservation{
+func createReservation(database *db.Database, scanner *bufio.Scanner) {
+	fmt.Print("ID de la salle : ")
+	scanner.Scan()
+	roomID, _ := strconv.Atoi(scanner.Text())
+	fmt.Print("Date (AAAA-MM-JJ) : ")
+	scanner.Scan()
+	date := scanner.Text()
+	fmt.Print("Heure de début (HH:MM) : ")
+	scanner.Scan()
+	startTime := scanner.Text()
+	fmt.Print("Heure de fin (HH:MM) : ")
+	scanner.Scan()
+	endTime := scanner.Text()
+
+	reservation := db.Reservation{
 		RoomID:    roomID,
 		Date:      date,
 		StartTime: startTime,
 		EndTime:   endTime,
-	})
-	if err != nil {
+	}
+	if err := database.AddReservation(reservation); err != nil {
 		fmt.Println("Erreur lors de la création de la réservation :", err)
 	} else {
 		fmt.Println("Réservation créée avec succès.")
 	}
 }
 
-func cancelReservation() {
-	reservationID := promptForInt("ID de la réservation à annuler : ")
-	err := database.CancelReservation(reservationID)
-	if err != nil {
+func cancelReservation(database *db.Database, scanner *bufio.Scanner) {
+	fmt.Print("ID de la réservation à annuler : ")
+	scanner.Scan()
+	reservationID, _ := strconv.Atoi(scanner.Text())
+
+	if err := database.CancelReservation(reservationID); err != nil {
 		fmt.Println("Erreur lors de l'annulation de la réservation :", err)
 	} else {
 		fmt.Println("Réservation annulée avec succès.")
 	}
 }
 
-func listReservations() {
-	fmt.Println("Liste de toutes les réservations :")
+func listReservations(database *db.Database) {
 	reservations := database.ListAllReservations()
 	if len(reservations) == 0 {
 		fmt.Println("Aucune réservation trouvée.")
@@ -127,33 +143,17 @@ func listReservations() {
 	}
 }
 
-func exportReservations(format string) {
-	filename := prompt("Entrez le nom du fichier pour l'export (ex : reservations.json ou reservations.csv) :")
-	var err error
+func exportReservations(database *db.Database, format string) {
+	filename := ""
 	if format == "json" {
-		err = database.ExportJSON(filename)
+		filename = "reservations.json"
 	} else if format == "csv" {
-		err = database.ExportCSV(filename)
+		filename = "reservations.csv"
 	}
-	if err != nil {
+
+	if err := database.ExportReservations(filename, format); err != nil {
 		fmt.Println("Erreur lors de l'export des réservations :", err)
 	} else {
 		fmt.Println("Réservations exportées avec succès.")
 	}
-}
-
-func prompt(message string) string {
-	fmt.Print(message)
-	scanner.Scan()
-	return scanner.Text()
-}
-
-func promptForInt(message string) int {
-	response := prompt(message)
-	number, err := strconv.Atoi(response)
-	if err != nil {
-		fmt.Println("Veuillez entrer un nombre valide.")
-		return promptForInt(message) // Récursivité pour demander à nouveau
-	}
-	return number
 }
