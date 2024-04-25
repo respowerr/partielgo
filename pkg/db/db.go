@@ -13,18 +13,19 @@ import (
 )
 
 type Room struct {
-	ID       int
-	Name     string
-	Capacity int
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Capacity int    `json:"capacity"`
 }
 
 type Reservation struct {
-	ID        int
-	RoomID    int
-	Date      string
-	StartTime string
-	EndTime   string
+	ID        int    `json:"id"`
+	RoomID    int    `json:"roomID"`
+	Date      string `json:"date"`
+	StartTime string `json:"startTime"`
+	EndTime   string `json:"endTime"`
 }
+
 type Database struct {
 	Connection *sql.DB
 }
@@ -85,12 +86,50 @@ func (db *Database) ListRooms() ([]Room, error) {
 	return rooms, nil
 }
 
+func (db *Database) ListAvailableRooms(date, startTime, endTime string) ([]Room, error) {
+	var availableRooms []Room
+	query := `SELECT * FROM rooms WHERE id NOT IN (
+		SELECT room_id FROM reservations WHERE date = ? AND NOT (
+			(end_time <= ? OR start_time >= ?)
+		)
+	);`
+	rows, err := db.Connection.Query(query, date, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var room Room
+		if err = rows.Scan(&room.ID, &room.Name, &room.Capacity); err != nil {
+			return nil, err
+		}
+		availableRooms = append(availableRooms, room)
+	}
+	return availableRooms, nil
+}
+
 func (db *Database) RemoveRoom(id int) error {
 	_, err := db.Connection.Exec("DELETE FROM rooms WHERE id = ?", id)
 	return err
 }
 
 func (db *Database) AddReservation(roomID int, date, startTime, endTime string) error {
+	availableRooms, err := db.ListAvailableRooms(date, startTime, endTime)
+	if err != nil {
+		return err
+	}
+	isAvailable := false
+	for _, room := range availableRooms {
+		if room.ID == roomID {
+			isAvailable = true
+			break
+		}
+	}
+	if !isAvailable {
+		return fmt.Errorf("the room is not available at the selected time")
+	}
+
 	stmt, err := db.Connection.Prepare("INSERT INTO reservations (room_id, date, start_time, end_time) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return err
@@ -117,10 +156,39 @@ func (db *Database) ListReservations() ([]Reservation, error) {
 	return reservations, nil
 }
 
-func (db *Database) CancelReservation(id int) error {
-	_, err := db.Connection.Exec("DELETE FROM reservations WHERE id = ?", id)
-	return err
+func (db *Database) ViewReservations(roomID int, date string) ([]Reservation, error) {
+	rows, err := db.Connection.Query("SELECT id, room_id, date, start_time, end_time FROM reservations WHERE room_id = ? AND date = ?", roomID, date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reservations []Reservation
+	for rows.Next() {
+		var reservation Reservation
+		if err = rows.Scan(&reservation.ID, &reservation.RoomID, &reservation.Date, &reservation.StartTime, &reservation.EndTime); err != nil {
+			return nil, err
+		}
+		reservations = append(reservations, reservation)
+	}
+	return reservations, nil
 }
+
+func (db *Database) CancelReservation(id int) error {
+	res, err := db.Connection.Exec("DELETE FROM reservations WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("no reservation found with id %d", id)
+	}
+	return nil
+}
+
 func (db *Database) ExportReservations(format string) error {
 	switch format {
 	case "json":
@@ -128,7 +196,7 @@ func (db *Database) ExportReservations(format string) error {
 	case "csv":
 		return db.exportReservationsAsCSV()
 	default:
-		return fmt.Errorf("unsupported format %s", format)
+		return fmt.Errorf("unsupported format: %s", format)
 	}
 }
 
@@ -142,9 +210,15 @@ func (db *Database) exportReservationsAsJSON() error {
 		return err
 	}
 	defer file.Close()
+
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "    ")
-	return encoder.Encode(reservations)
+	err = encoder.Encode(reservations)
+	if err != nil {
+		return fmt.Errorf("error encoding reservations to JSON: %v", err)
+	}
+
+	return nil
 }
 
 func (db *Database) exportReservationsAsCSV() error {
@@ -157,19 +231,32 @@ func (db *Database) exportReservationsAsCSV() error {
 		return err
 	}
 	defer file.Close()
+
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Writing CSV header
-	if err := writer.Write([]string{"ID", "RoomID", "Date", "StartTime", "EndTime"}); err != nil {
-		return err
+	headers := []string{"ID", "RoomID", "Date", "StartTime", "EndTime"}
+	if err := writer.Write(headers); err != nil {
+		return fmt.Errorf("error writing CSV header: %v", err)
 	}
 
-	// Writing data rows
 	for _, res := range reservations {
-		if err := writer.Write([]string{strconv.Itoa(res.ID), strconv.Itoa(res.RoomID), res.Date, res.StartTime, res.EndTime}); err != nil {
-			return err
+		record := []string{
+			strconv.Itoa(res.ID),
+			strconv.Itoa(res.RoomID),
+			res.Date,
+			res.StartTime,
+			res.EndTime,
+		}
+		if err := writer.Write(record); err != nil {
+			return fmt.Errorf("error writing reservation to CSV: %v", err)
 		}
 	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("error flushing CSV writer: %v", err)
+	}
+
 	return nil
 }

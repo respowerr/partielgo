@@ -1,1 +1,23 @@
-null
+[
+    {
+        "id": 1,
+        "room_id": 1,
+        "date": "2004-01-10",
+        "start_time": "12:50",
+        "end_time": "13:50"
+    },
+    {
+        "id": 2,
+        "room_id": 1,
+        "date": "2",
+        "start_time": "2",
+        "end_time": "2"
+    },
+    {
+        "id": 3,
+        "room_id": 7,
+        "date": "2004-05-05",
+        "start_time": "01:54",
+        "end_time": "02:54"
+    }
+]
