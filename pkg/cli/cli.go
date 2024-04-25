@@ -27,7 +27,7 @@ func Run(database *db.Database) {
 		fmt.Println("10. Visualiser les réservations pour une salle et une date")
 		fmt.Println("11. Quitter")
 
-		fmt.Print("Choisissez une option: ")
+		fmt.Print("Veuillez choisir une option: ")
 		scanner.Scan()
 		choice := scanner.Text()
 
@@ -56,7 +56,7 @@ func Run(database *db.Database) {
 			fmt.Println("Au revoir !")
 			os.Exit(0)
 		default:
-			fmt.Println("Option non valide. Veuillez choisir une option valide.")
+			fmt.Println("Option non valide.")
 		}
 	}
 }
