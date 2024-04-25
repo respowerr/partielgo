@@ -56,7 +56,7 @@ Projet de réservation de salle en GoLang en CLI et interface WEB.
 #### Supprimer une chambre
 
 ```http
-  GET /deleteroom
+  DELETE /deleteroom
 ```
 | Parameter | Type     | Description                |
 | :-------- | :------- | :------------------------- |
